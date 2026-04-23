@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Practice Plugin</title>
+
+  <script type="application/oqse-manifest+json">
+  {
+    "$schema": "https://cdn.jsdelivr.net/gh/memizy/oqse-specification@main/schemas/oqse-manifest-v0.1.json",
+    "version": "0.1",
+    "pluginVersion": "0.1.0",
+    "id": "https://memizy.github.io/plugin-practice/",
+    "appName": "Practice Mode",
+    "description": "Classic Leitner spaced repetition drilling. Focuses on items you don't know well yet.",
+    "author": { "name": "Memizy" },
+    "license": "MIT",
+    "emoji": "🏋️",
+    "studyMode": "drill",
+    "questionDensity": "high",
+    "capabilities": {
+      "actions": ["render"],
+      "types": ["flashcard", "mcq-single", "mcq-multi", "true-false", "match-pairs", "sort-items", "short-answer", "note"],
+      "features": ["markdown", "math", "html"]
+    }
+  }
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "@memizy/plugin-sdk": "https://cdn.jsdelivr.net/npm/@memizy/plugin-sdk@0.3.3/dist/memizy-sdk.js",
+        "penpal": "https://esm.sh/penpal@7.0.6",
+        "mutative": "https://esm.sh/mutative@1.3.0",
+        "@memizy/oqse": "https://esm.sh/@memizy/oqse@0.1.6"
+      }
+    }
+  </script>
+
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
+
+    :root {
+      --bg-color: #f8fafc;
+      --card-bg: #ffffff;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --accent: #f97316;
+      --accent-hover: #ea580c;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --b0: #94a3b8;
+      --b1: #ef4444;
+      --b2: #f97316;
+      --b3: #eab308;
+      --b4: #22c55e;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      max-width: 800px;
+      margin: 0 auto;
+      width: 100%;
+      padding: 1rem;
+    }
+
+    .header {
+      display: flex;
+      justify-content: center;
+      padding: 1rem 0 2rem;
+    }
+
+    .stats-container {
+      display: flex;
+      gap: 0.5rem;
+      background: #ffffff;
+      padding: 0.5rem;
+      border-radius: 999px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .stat-pill {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: white;
+      font-size: 0.875rem;
+      box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.1);
+      transition: transform 0.2s;
+    }
+
+    .stat-pill:hover {
+      transform: translateY(-1px);
+    }
+
+    .bucket-0 { background: var(--b0); }
+    .bucket-1 { background: var(--b1); }
+    .bucket-2 { background: var(--b2); }
+    .bucket-3 { background: var(--b3); }
+    .bucket-4 { background: var(--b4); }
+
+    .card-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      perspective: 1000px;
+    }
+
+    .flashcard {
+      background: var(--card-bg);
+      width: 100%;
+      max-width: 600px;
+      min-height: 400px;
+      border-radius: 1.5rem;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: transform 0.3s ease;
+    }
+
+    .flashcard:hover {
+      transform: translateY(-2px);
+    }
+
+    .card-content {
+      padding: 2.5rem;
+      flex: 1;
+      font-size: 1.15rem;
+      line-height: 1.6;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      text-align: center;
+      gap: 0.8rem;
+    }
+
+    .card-content p {
+      margin: 0;
+    }
+
+    .muted {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    .card-actions {
+      padding: 1.5rem 2.5rem;
+      background: #f8fafc;
+      border-top: 1px solid #e2e8f0;
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    button {
+      padding: 0.75rem 1.5rem;
+      border: none;
+      border-radius: 0.75rem;
+      font-weight: 600;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.75;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #ffffff;
+      width: 100%;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-hover);
+    }
+
+    .btn-correct {
+      background: var(--b4);
+      color: #ffffff;
+      flex: 1;
+    }
+
+    .btn-incorrect {
+      background: var(--b1);
+      color: #ffffff;
+      flex: 1;
+    }
+
+    .btn-correct:hover,
+    .btn-incorrect:hover {
+      filter: brightness(1.1);
+    }
+
+    .option-btn {
+      width: 100%;
+      text-align: left;
+      padding: 1rem;
+      background: #ffffff;
+      border: 2px solid #e2e8f0;
+      color: var(--text-main);
+      font-weight: 500;
+      border-radius: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .option-btn:hover {
+      border-color: var(--primary);
+      background: #eff6ff;
+    }
+
+    .option-btn.active {
+      border-color: var(--primary);
+      background: #dbeafe;
+    }
+
+    .option-btn.correct {
+      background: #dcfce7;
+      border-color: var(--b4);
+      color: #166534;
+    }
+
+    .option-btn.wrong {
+      background: #fee2e2;
+      border-color: var(--b1);
+      color: #991b1b;
+    }
+
+    .input-text {
+      width: 100%;
+      padding: 1rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 0.75rem;
+      font-size: 1.1rem;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+
+    .input-text:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    pre {
+      text-align: left;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 0.75rem;
+      padding: 0.75rem;
+      font-size: 0.9rem;
+      max-height: 200px;
+      overflow: auto;
+      width: 100%;
+    }
+
+    .pair-row,
+    .sort-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      align-items: center;
+      width: 100%;
+      margin-bottom: 0.5rem;
+      text-align: left;
+    }
+
+    .pair-prompt {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 0.75rem;
+      padding: 0.75rem;
+    }
+
+    .pair-select {
+      width: 100%;
+      border: 2px solid #e2e8f0;
+      border-radius: 0.75rem;
+      padding: 0.7rem;
+      background: #fff;
+      color: var(--text-main);
+      font-size: 1rem;
+    }
+
+    .pair-select:disabled {
+      opacity: 1;
+    }
+
+    .pair-select.correct {
+      background: #dcfce7;
+      border-color: var(--b4);
+      color: #166534;
+    }
+
+    .pair-select.wrong {
+      background: #fee2e2;
+      border-color: var(--b1);
+      color: #991b1b;
+    }
+
+    .sort-row {
+      grid-template-columns: 1fr auto;
+      background: #fff;
+      border: 2px solid #e2e8f0;
+      border-radius: 0.75rem;
+      padding: 0.6rem;
+    }
+
+    .sort-row.correct {
+      border-color: var(--b4);
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .sort-row.wrong {
+      border-color: var(--b1);
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .sort-controls {
+      display: flex;
+      gap: 0.4rem;
+    }
+
+    .btn-move {
+      width: auto;
+      padding: 0.4rem 0.6rem;
+      border-radius: 0.5rem;
+      background: #e2e8f0;
+      color: #0f172a;
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="stats-container" id="stats-container">
+        <div class="stat-pill bucket-0" title="New"><span class="count" id="count-0">0</span></div>
+        <div class="stat-pill bucket-1" title="Learning"><span class="count" id="count-1">0</span></div>
+        <div class="stat-pill bucket-2" title="Reviewing"><span class="count" id="count-2">0</span></div>
+        <div class="stat-pill bucket-3" title="Mastering"><span class="count" id="count-3">0</span></div>
+        <div class="stat-pill bucket-4" title="Known"><span class="count" id="count-4">0</span></div>
+      </div>
+    </header>
+
+    <main class="card-container">
+      <div class="flashcard" id="flashcard">
+        <div id="card-content" class="card-content">Loading...</div>
+        <div id="card-actions" class="card-actions"></div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module">
+    import { MemizySDK } from "@memizy/plugin-sdk";
+
+    const sdk = new MemizySDK({
+      id: "https://memizy.github.io/plugin-practice/",
+      version: "0.1.0"
+    });
+
+    const contentEl = document.getElementById("card-content");
+    const actionsEl = document.getElementById("card-actions");
+
+    let items = [];
+    let currentItem = null;
+    let lastItemId = null;
+
+    const WEIGHTS = { 0: 1.0, 1: 1.0, 2: 0.7, 3: 0.4, 4: 0.1 };
+
+    const sanitizeAndRender = (text) => {
+      const safeText = typeof text === "string" ? text : "";
+      const html = sdk.text.renderHtml(safeText, {
+        markdownParser: (s) => marked.parse(s),
+        sanitizer: (rawHtml) => DOMPurify.sanitize(rawHtml)
+      });
+      return html;
+    };
+
+    const shuffle = (arr) => {
+      const copy = [...arr];
+      for (let i = copy.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    };
+
+    const normalizeText = (value, { caseSensitive, trimWhitespace, ignoreDiacritics }) => {
+      let v = String(value ?? "");
+      if (trimWhitespace) v = v.trim();
+      if (ignoreDiacritics) v = v.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (!caseSensitive) v = v.toLowerCase();
+      return v;
+    };
+
+    const levenshteinDistance = (a, b) => {
+      const dp = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+      for (let i = 0; i <= a.length; i += 1) dp[i][0] = i;
+      for (let j = 0; j <= b.length; j += 1) dp[0][j] = j;
+      for (let i = 1; i <= a.length; i += 1) {
+        for (let j = 1; j <= b.length; j += 1) {
+          const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+          dp[i][j] = Math.min(
+            dp[i - 1][j] + 1,
+            dp[i][j - 1] + 1,
+            dp[i - 1][j - 1] + cost
+          );
+        }
+      }
+      return dp[a.length][b.length];
+    };
+
+    const getBucketFor = (itemId) => {
+      const progress = sdk.store.getProgress();
+      const bucket = progress[itemId]?.bucket ?? 0;
+      return Math.max(0, Math.min(4, Number(bucket) || 0));
+    };
+
+    function updateStats() {
+      const counts = [0, 0, 0, 0, 0];
+      for (const item of items) {
+        const b = getBucketFor(item.id);
+        counts[b] += 1;
+      }
+      for (let i = 0; i <= 4; i += 1) {
+        const el = document.getElementById(`count-${i}`);
+        if (el) el.textContent = String(counts[i]);
+      }
+    }
+
+    function drawNextItem() {
+      if (!items.length) {
+        currentItem = null;
+        contentEl.innerHTML = '<p class="muted">No items</p>';
+        actionsEl.innerHTML = "";
+        return;
+      }
+
+      const available = items.length === 1 ? items : items.filter((it) => it.id !== lastItemId);
+      let totalWeight = 0;
+      const weighted = available.map((it) => {
+        const weight = WEIGHTS[getBucketFor(it.id)] ?? 0.1;
+        totalWeight += weight;
+        return { item: it, weight };
+      });
+
+      if (totalWeight <= 0) {
+        currentItem = available[Math.floor(Math.random() * available.length)] ?? null;
+      } else {
+        let random = Math.random() * totalWeight;
+        let chosen = weighted[weighted.length - 1]?.item ?? null;
+        for (const pair of weighted) {
+          random -= pair.weight;
+          if (random <= 0) {
+            chosen = pair.item;
+            break;
+          }
+        }
+        currentItem = chosen;
+      }
+
+      if (!currentItem) {
+        contentEl.innerHTML = '<p class="muted">No items</p>';
+        actionsEl.innerHTML = "";
+        return;
+      }
+
+      lastItemId = currentItem.id;
+      sdk.store.startItemTimer(currentItem.id);
+      renderItem(currentItem);
+    }
+
+    function selfAssessmentButtons() {
+      actionsEl.innerHTML = `
+        <button class="btn-incorrect" id="btn-fail">I didn't get it</button>
+        <button class="btn-correct" id="btn-pass">Got it!</button>
+      `;
+      document.getElementById("btn-fail")?.addEventListener("click", () => submitAnswer(false));
+      document.getElementById("btn-pass")?.addEventListener("click", () => submitAnswer(true));
+    }
+
+    function getPromptText(item) {
+      return item.question || item.prompt || item.front || item.title || "Untitled item";
+    }
+
+    function renderNoteOrFlashcard(item) {
+      const isFlashcard = item.type === "flashcard";
+      const frontText = isFlashcard
+        ? (item.front || item.title || "Card")
+        : (item.title || item.question || "Study note");
+      const backText = isFlashcard
+        ? (item.back || "No back content.")
+        : (item.hiddenContent || item.content || "No additional content.");
+
+      contentEl.innerHTML = sanitizeAndRender(isFlashcard ? frontText : (item.content || frontText));
+      actionsEl.innerHTML = '<button class="btn-primary" id="btn-reveal">Reveal</button>';
+      document.getElementById("btn-reveal")?.addEventListener("click", () => {
+        contentEl.innerHTML = `
+          <div>${sanitizeAndRender(frontText)}</div>
+          <hr style="border:none;border-top:1px solid #e2e8f0;width:100%;margin:0.5rem 0;">
+          <div>${sanitizeAndRender(backText)}</div>
+        `;
+        selfAssessmentButtons();
+      });
+    }
+
+    function renderMcq(item) {
+      const isMulti = item.type === "mcq-multi";
+      const isTrueFalse = item.type === "true-false";
+
+      const rawOptions = Array.isArray(item.options)
+        ? item.options
+        : (isTrueFalse ? ["True", "False"] : []);
+      const base = rawOptions.map((label, idx) => ({ originalIndex: idx, label }));
+      const displayOptions = item.shuffleOptions === false ? base : shuffle(base);
+
+      const question = getPromptText(item);
+      contentEl.innerHTML = `
+        <div>${sanitizeAndRender(question)}</div>
+        <div id="option-list"></div>
+        <div id="mcq-feedback" class="muted"></div>
+      `;
+
+      const optionList = document.getElementById("option-list");
+      const feedbackEl = document.getElementById("mcq-feedback");
+      const selected = new Set();
+      let selectedSingle = null;
+
+      displayOptions.forEach((opt, idx) => {
+        const label = typeof opt.label === "string"
+          ? opt.label
+          : (opt?.label || opt?.text || String(opt?.value ?? `Option ${idx + 1}`));
+        const btn = document.createElement("button");
+        btn.className = "option-btn";
+        btn.type = "button";
+        btn.innerHTML = sanitizeAndRender(label);
+        btn.dataset.index = String(idx);
+        btn.addEventListener("click", () => {
+          if (btn.disabled) return;
+          if (isMulti) {
+            if (selected.has(idx)) {
+              selected.delete(idx);
+              btn.classList.remove("active");
+            } else {
+              const max = Number.isInteger(item.maxSelections) ? item.maxSelections : displayOptions.length;
+              if (selected.size >= max) return;
+              selected.add(idx);
+              btn.classList.add("active");
+            }
+          } else {
+            selectedSingle = idx;
+            optionList?.querySelectorAll(".option-btn").forEach((other) => other.classList.remove("active"));
+            btn.classList.add("active");
+          }
+        });
+        optionList?.appendChild(btn);
+      });
+
+      actionsEl.innerHTML = '<button class="btn-primary" id="btn-check">Check Answer</button>';
+      document.getElementById("btn-check")?.addEventListener("click", () => {
+        const optionButtons = optionList ? [...optionList.querySelectorAll(".option-btn")] : [];
+        const correctOriginalIndices = isTrueFalse
+          ? new Set([item.answer === true ? 0 : 1])
+          : new Set(isMulti ? (Array.isArray(item.correctIndices) ? item.correctIndices : []) : [item.correctIndex]);
+
+        if (isMulti) {
+          const min = Number.isInteger(item.minSelections) ? item.minSelections : 1;
+          if (selected.size < min) {
+            if (feedbackEl) feedbackEl.textContent = `Select at least ${min} option(s) before checking.`;
+            return;
+          }
+        } else if (selectedSingle === null) {
+          if (feedbackEl) feedbackEl.textContent = "Select an option before checking.";
+          return;
+        }
+
+        optionButtons.forEach((btn) => { btn.disabled = true; });
+        const selectedDisplayIndices = isMulti ? new Set(selected) : new Set([selectedSingle]);
+        const selectedOriginalIndices = new Set([...selectedDisplayIndices].map((i) => displayOptions[i].originalIndex));
+
+        optionButtons.forEach((btn, displayIndex) => {
+          const originalIndex = displayOptions[displayIndex].originalIndex;
+          const isCorrectOption = correctOriginalIndices.has(originalIndex);
+          const isSelected = selectedDisplayIndices.has(displayIndex);
+          if (isCorrectOption) btn.classList.add("correct");
+          if (isSelected && !isCorrectOption) btn.classList.add("wrong");
+          btn.classList.remove("active");
+        });
+
+        const perfectMatch = selectedOriginalIndices.size === correctOriginalIndices.size
+          && [...selectedOriginalIndices].every((idx) => correctOriginalIndices.has(idx));
+        if (feedbackEl) feedbackEl.textContent = perfectMatch ? "Correct pattern." : "Review the highlighted options.";
+        selfAssessmentButtons();
+      });
+    }
+
+    function renderShortAnswer(item) {
+      const question = getPromptText(item);
+      contentEl.innerHTML = `
+        <div>${sanitizeAndRender(question)}</div>
+        <input type="text" id="short-input" class="input-text" placeholder="Type your answer..." />
+        <div id="short-feedback" class="muted"></div>
+      `;
+
+      actionsEl.innerHTML = '<button class="btn-primary" id="btn-check">Check Answer</button>';
+      document.getElementById("btn-check")?.addEventListener("click", () => {
+        const inputEl = document.getElementById("short-input");
+        const feedbackEl = document.getElementById("short-feedback");
+        const userRaw = String(inputEl?.value ?? "");
+        const trimWhitespace = item.trimWhitespace !== false;
+        const caseSensitive = item.caseSensitive === true;
+        const ignoreDiacritics = item.ignoreDiacritics === true;
+        const acceptPartial = item.acceptPartial === true;
+
+        const userAnswer = normalizeText(userRaw, { caseSensitive, trimWhitespace, ignoreDiacritics });
+        const acceptedAnswers = Array.isArray(item.answers) && item.answers.length
+          ? item.answers
+          : [item.answer, item.correctAnswer].filter((v) => typeof v === "string" && v.trim().length);
+        const normalizedAnswers = acceptedAnswers.map((ans) => normalizeText(ans, { caseSensitive, trimWhitespace, ignoreDiacritics }));
+
+        let isCorrect = normalizedAnswers.includes(userAnswer);
+        if (!isCorrect && acceptPartial && userAnswer.length > 0) {
+          isCorrect = normalizedAnswers.some((ans) => levenshteinDistance(userAnswer, ans) <= 1);
+        }
+
+        if (feedbackEl) {
+          feedbackEl.textContent = isCorrect
+            ? "Looks correct."
+            : `Expected one of: ${acceptedAnswers.join(", ") || "(no answer provided)"}`;
+          feedbackEl.style.color = isCorrect ? "#166534" : "#991b1b";
+        }
+
+        if (inputEl) inputEl.disabled = true;
+        const checkBtn = document.getElementById("btn-check");
+        if (checkBtn) checkBtn.disabled = true;
+        selfAssessmentButtons();
+      });
+    }
+
+    function renderMatchPairs(item) {
+      const prompts = Array.isArray(item.prompts) ? item.prompts : [];
+      const matches = Array.isArray(item.matches) ? item.matches : [];
+      const question = getPromptText(item);
+
+      contentEl.innerHTML = `
+        <div>${sanitizeAndRender(question)}</div>
+        <div id="pairs-list"></div>
+      `;
+      const listEl = document.getElementById("pairs-list");
+      const shuffledMatches = shuffle(matches);
+
+      prompts.forEach((prompt, idx) => {
+        const row = document.createElement("div");
+        row.className = "pair-row";
+        row.innerHTML = `
+          <div class="pair-prompt">${sanitizeAndRender(prompt)}</div>
+          <select class="pair-select" data-index="${idx}"></select>
+        `;
+        const selectEl = row.querySelector("select");
+        if (selectEl) {
+          selectEl.innerHTML = `<option value="">Select match...</option>`;
+          shuffledMatches.forEach((m) => {
+            const option = document.createElement("option");
+            option.value = String(m);
+            option.textContent = String(m);
+            selectEl.appendChild(option);
+          });
+        }
+        listEl?.appendChild(row);
+      });
+
+      actionsEl.innerHTML = '<button class="btn-primary" id="btn-check">Check Answer</button>';
+      document.getElementById("btn-check")?.addEventListener("click", () => {
+        const selects = listEl ? [...listEl.querySelectorAll(".pair-select")] : [];
+        selects.forEach((selectEl, idx) => {
+          const expected = String(matches[idx] ?? "");
+          const selectedValue = String(selectEl.value ?? "");
+          selectEl.disabled = true;
+          selectEl.classList.remove("correct", "wrong");
+          selectEl.classList.add(selectedValue === expected ? "correct" : "wrong");
+        });
+        const checkBtn = document.getElementById("btn-check");
+        if (checkBtn) checkBtn.disabled = true;
+        selfAssessmentButtons();
+      });
+    }
+
+    function renderSortItems(item) {
+      const correctOrder = Array.isArray(item.items) ? item.items.map(String) : [];
+      let currentOrder = shuffle(correctOrder);
+      const question = getPromptText(item);
+
+      contentEl.innerHTML = `
+        <div>${sanitizeAndRender(question)}</div>
+        <div id="sort-list"></div>
+      `;
+      const listEl = document.getElementById("sort-list");
+
+      const renderList = () => {
+        if (!listEl) return;
+        listEl.innerHTML = "";
+        currentOrder.forEach((label, idx) => {
+          const row = document.createElement("div");
+          row.className = "sort-row";
+          row.innerHTML = `
+            <div>${sanitizeAndRender(label)}</div>
+            <div class="sort-controls">
+              <button type="button" class="btn-move" data-dir="up" data-index="${idx}">▲</button>
+              <button type="button" class="btn-move" data-dir="down" data-index="${idx}">▼</button>
+            </div>
+          `;
+          listEl.appendChild(row);
+        });
+
+        listEl.querySelectorAll(".btn-move").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            if (btn.disabled) return;
+            const index = Number(btn.dataset.index);
+            const dir = btn.dataset.dir;
+            const target = dir === "up" ? index - 1 : index + 1;
+            if (target < 0 || target >= currentOrder.length) return;
+            [currentOrder[index], currentOrder[target]] = [currentOrder[target], currentOrder[index]];
+            renderList();
+          });
+        });
+      };
+
+      renderList();
+      actionsEl.innerHTML = '<button class="btn-primary" id="btn-check">Check Answer</button>';
+      document.getElementById("btn-check")?.addEventListener("click", () => {
+        const rows = listEl ? [...listEl.querySelectorAll(".sort-row")] : [];
+        rows.forEach((row, idx) => {
+          row.classList.remove("correct", "wrong");
+          row.classList.add(currentOrder[idx] === correctOrder[idx] ? "correct" : "wrong");
+        });
+        listEl?.querySelectorAll(".btn-move").forEach((btn) => { btn.disabled = true; });
+        const checkBtn = document.getElementById("btn-check");
+        if (checkBtn) checkBtn.disabled = true;
+        selfAssessmentButtons();
+      });
+    }
+
+    function renderFallback(item) {
+      const prompt = getPromptText(item);
+      contentEl.innerHTML = `
+        <div>${sanitizeAndRender(prompt)}</div>
+        <p class="muted">Self-assess this item in practice mode.</p>
+        <pre>${DOMPurify.sanitize(JSON.stringify(item, null, 2))}</pre>
+      `;
+      selfAssessmentButtons();
+    }
+
+    function renderItem(item) {
+      actionsEl.innerHTML = "";
+      if (item.type === "note" || item.type === "flashcard") return renderNoteOrFlashcard(item);
+      if (item.type === "true-false" || item.type === "mcq-single" || item.type === "mcq-multi") return renderMcq(item);
+      if (item.type === "short-answer") return renderShortAnswer(item);
+      if (item.type === "match-pairs") return renderMatchPairs(item);
+      if (item.type === "sort-items") return renderSortItems(item);
+      return renderFallback(item);
+    }
+
+    function submitAnswer(isCorrect) {
+      if (!currentItem) return;
+      sdk.store.answer(currentItem.id, Boolean(isCorrect));
+      updateStats();
+      drawNextItem();
+    }
+
+    try {
+      await sdk.connect();
+      items = sdk.store.getItems();
+      updateStats();
+      drawNextItem();
+      sdk.onSetUpdated(() => {
+        items = sdk.store.getItems();
+        updateStats();
+        drawNextItem();
+      });
+    } catch (error) {
+      contentEl.innerHTML = `<p class="muted">Failed to initialize plugin: ${String(error)}</p>`;
+      actionsEl.innerHTML = "";
+      console.error(error);
+    }
+  </script>
+</body>
+</html>

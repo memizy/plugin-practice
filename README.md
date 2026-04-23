@@ -1,8 +1,3 @@
-Zde je návrh `README.md` pro tvůj nový **Practice Plugin**. Je stylizovaný tak, aby ladil s ostatními pluginy v ekosystému Memizy a hned na začátku nabízí tlačítka pro rychlé vyzkoušení s testovací sadou.
-
-***
-
-```markdown
 <div align="center">
 
 # 🏋️ Practice Plugin
@@ -80,4 +75,3 @@ Tento plugin je ukázkou čisté implementace v **Vanilla JavaScriptu** bez nutn
 
 ---
 *Vytvořeno jako součást otevřeného ekosystému Memizy.*
-```

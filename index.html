@@ -37,6 +37,15 @@
 
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [["$", "$"], ["\\(", "\\)"]],
+        displayMath: [["$$", "$$"], ["\\[", "\\]"]],
+      },
+    };
+  </script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
   <script type="importmap">
     {
       "imports": {
@@ -489,23 +498,36 @@
       assetReplacer: (key, media) => renderAssetHtml(key, media),
     };
 
+    function typesetCardMath(root) {
+      if (!root || !window.MathJax || !window.MathJax.typesetPromise) return Promise.resolve();
+      return window.MathJax.typesetPromise([root]).catch((e) => console.warn("MathJax:", e));
+    }
+
     const sanitizeAndRender = (text) => {
       const safeText = typeof text === "string" ? text : "";
+      const blocks = [];
+      let t = safeText;
+      for (const re of [/\$\$([\s\S]*?)\$\$/g, /\\\[([\s\S]*?)\\\]/g, /\\\(([\s\S]*?)\\\)/g, /\$([^$\n]+?)\$/g]) {
+        t = t.replace(re, (full) => {
+          const id = blocks.length;
+          blocks.push(full);
+          return `MATHPH${id}MATHPH`;
+        });
+      }
       try {
-        return sdk.text.renderHtml(safeText, RICH_HTML_OPTS);
+        let html = sdk.text.renderHtml(t, RICH_HTML_OPTS);
+        html = String(html).replace(/MATHPH(\d+)MATHPH/g, (_, i) => blocks[+i] ?? "");
+        return html;
       } catch (error) {
-        // If the SDK blocks raw HTML because of Tier 1 strictness, escape it into standard text.
         if (error.message && error.message.includes("Raw HTML tags are not allowed")) {
           const escapedText = safeText
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;");
 
-          // Render the escaped version so the HTML tags display as plain text.
           return sdk.text.renderHtml(escapedText, RICH_HTML_OPTS);
         }
 
-        // Fallback for any other unexpected rendering errors.
         return DOMPurify.sanitize(safeText);
       }
     };
@@ -635,6 +657,7 @@
           <div>${sanitizeAndRender(backText)}</div>
         `;
         selfAssessmentButtons();
+        void typesetCardMath(contentEl);
       });
     }
 
@@ -886,12 +909,13 @@
 
     function renderItem(item) {
       actionsEl.innerHTML = "";
-      if (item.type === "note" || item.type === "flashcard") return renderNoteOrFlashcard(item);
-      if (item.type === "true-false" || item.type === "mcq-single" || item.type === "mcq-multi") return renderMcq(item);
-      if (item.type === "short-answer") return renderShortAnswer(item);
-      if (item.type === "match-pairs") return renderMatchPairs(item);
-      if (item.type === "sort-items") return renderSortItems(item);
-      return renderFallback(item);
+      if (item.type === "note" || item.type === "flashcard") renderNoteOrFlashcard(item);
+      else if (item.type === "true-false" || item.type === "mcq-single" || item.type === "mcq-multi") renderMcq(item);
+      else if (item.type === "short-answer") renderShortAnswer(item);
+      else if (item.type === "match-pairs") renderMatchPairs(item);
+      else if (item.type === "sort-items") renderSortItems(item);
+      else renderFallback(item);
+      void typesetCardMath(contentEl);
     }
 
     function submitAnswer(isCorrect) {

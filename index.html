@@ -21,7 +21,8 @@
     "capabilities": {
       "actions": ["render"],
       "types": ["flashcard", "mcq-single", "mcq-multi", "true-false", "match-pairs", "sort-items", "short-answer", "note"],
-      "features": ["markdown", "math", "html"]
+      "features": ["markdown", "math", "html"],
+      "assets": { "image": ["*"], "audio": ["*"], "video": ["*"], "model": null }
     },
     "appSpecific": {
       "memizy": {
@@ -168,6 +169,12 @@
 
     .card-content p {
       margin: 0;
+    }
+
+    #card-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 0.5rem;
     }
 
     .muted {
@@ -406,13 +413,30 @@
 
     const WEIGHTS = { 0: 1.0, 1: 1.0, 2: 0.7, 3: 0.4, 4: 0.1 };
 
+    function parseMarkdownPreservingOqseTokens(md) {
+      const TOKEN_RE = /\[\[__OQSE_TOKEN_[a-z0-9]+__\]\]/gi;
+      const vault = [];
+      const safe = md.replace(TOKEN_RE, (full) => {
+        vault.push(full);
+        return `\n<!--OQSE-TOKEN-${vault.length - 1}-->\n`;
+      });
+      let html = marked.parse(safe);
+      for (let i = 0; i < vault.length; i++) {
+        html = html.split(`<!--OQSE-TOKEN-${i}-->`).join(vault[i]);
+      }
+      return html;
+    }
+
+    const RICH_HTML_OPTS = {
+      markdownParser: (s) => parseMarkdownPreservingOqseTokens(s),
+      sanitizer: (rawHtml) => DOMPurify.sanitize(rawHtml),
+      requirements: { features: ["markdown", "math", "html"] },
+    };
+
     const sanitizeAndRender = (text) => {
       const safeText = typeof text === "string" ? text : "";
       try {
-        return sdk.text.renderHtml(safeText, {
-          markdownParser: (s) => marked.parse(s),
-          sanitizer: (rawHtml) => DOMPurify.sanitize(rawHtml)
-        });
+        return sdk.text.renderHtml(safeText, RICH_HTML_OPTS);
       } catch (error) {
         // If the SDK blocks raw HTML because of Tier 1 strictness, escape it into standard text.
         if (error.message && error.message.includes("Raw HTML tags are not allowed")) {
@@ -422,10 +446,7 @@
             .replace(/>/g, "&gt;");
 
           // Render the escaped version so the HTML tags display as plain text.
-          return sdk.text.renderHtml(escapedText, {
-            markdownParser: (s) => marked.parse(s),
-            sanitizer: (rawHtml) => DOMPurify.sanitize(rawHtml)
-          });
+          return sdk.text.renderHtml(escapedText, RICH_HTML_OPTS);
         }
 
         // Fallback for any other unexpected rendering errors.

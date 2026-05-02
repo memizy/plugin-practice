@@ -408,11 +408,29 @@
 
     const sanitizeAndRender = (text) => {
       const safeText = typeof text === "string" ? text : "";
-      const html = sdk.text.renderHtml(safeText, {
-        markdownParser: (s) => marked.parse(s),
-        sanitizer: (rawHtml) => DOMPurify.sanitize(rawHtml)
-      });
-      return html;
+      try {
+        return sdk.text.renderHtml(safeText, {
+          markdownParser: (s) => marked.parse(s),
+          sanitizer: (rawHtml) => DOMPurify.sanitize(rawHtml)
+        });
+      } catch (error) {
+        // If the SDK blocks raw HTML because of Tier 1 strictness, escape it into standard text.
+        if (error.message && error.message.includes("Raw HTML tags are not allowed")) {
+          const escapedText = safeText
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+
+          // Render the escaped version so the HTML tags display as plain text.
+          return sdk.text.renderHtml(escapedText, {
+            markdownParser: (s) => marked.parse(s),
+            sanitizer: (rawHtml) => DOMPurify.sanitize(rawHtml)
+          });
+        }
+
+        // Fallback for any other unexpected rendering errors.
+        return DOMPurify.sanitize(safeText);
+      }
     };
 
     const shuffle = (arr) => {
